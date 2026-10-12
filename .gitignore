@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# QA (Playwright) - ver también pos_web/.gitignore
+pos_web/node_modules/
+pos_web/playwright-report/
+pos_web/test-results/
+
+# Logs
+*.log
+ui_*.log
+logs/
+*.log.*
+
+# Herramientas de terceros descargadas (com0com, etc.)
+tools/

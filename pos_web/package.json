@@ -1,0 +1,17 @@
+{
+  "name": "pos-web-bascula",
+  "version": "1.0.0",
+  "private": true,
+  "description": "POS Web (Web Serial API) para báscula serial + pruebas E2E con Playwright",
+  "scripts": {
+    "servir": "python -m http.server 8000 --bind 127.0.0.1",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "report": "playwright show-report",
+    "codegen": "playwright codegen http://127.0.0.1:8000/index.html"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0"
+  }
+}

@@ -1,0 +1,215 @@
+/* =====================================================================
+   POS Web - Estilos
+   [DEMO] Estilos de la demo a clientes. Sustituir por el diseño real del
+          POS en producción (ver guia_pos_completo_produccion.txt).
+   Diseño limpio y moderno, sin dependencias externas.
+   ===================================================================== */
+
+:root {
+  --fondo: #0f172a;
+  --fondo-panel: #1e293b;
+  --fondo-panel-2: #273449;
+  --borde: #334155;
+  --texto: #e2e8f0;
+  --texto-suave: #94a3b8;
+  --acento: #38bdf8;
+  --acento-fuerte: #0ea5e9;
+  --verde: #22c55e;
+  --rojo: #ef4444;
+  --ambar: #f59e0b;
+  --radio: 14px;
+  --sombra: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  background: radial-gradient(1200px 600px at 50% -10%, #1e3a8a33, transparent),
+              var(--fondo);
+  color: var(--texto);
+  display: flex;
+  justify-content: center;
+  padding: 32px 16px;
+}
+
+.app {
+  width: 100%;
+  max-width: 880px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Encabezado ------------------------------------------------------- */
+.app__header h1 {
+  margin: 0;
+  font-size: 1.7rem;
+  font-weight: 700;
+}
+.app__header h1 span { color: var(--acento); font-weight: 400; }
+.app__subtitle {
+  margin: 6px 0 0;
+  color: var(--texto-suave);
+  font-size: 0.9rem;
+}
+
+/* Tarjetas --------------------------------------------------------- */
+.card {
+  background: var(--fondo-panel);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+  padding: 18px 20px;
+}
+
+.card h2 {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--texto-suave);
+}
+
+/* Configuración ---------------------------------------------------- */
+.card--config {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 16px;
+  align-items: end;
+}
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label {
+  font-size: 0.8rem;
+  color: var(--texto-suave);
+}
+
+input, select {
+  background: var(--fondo-panel-2);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  color: var(--texto);
+  padding: 10px 12px;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+input:focus, select:focus { border-color: var(--acento); }
+
+/* Botones ---------------------------------------------------------- */
+.btn {
+  border: none;
+  border-radius: 10px;
+  padding: 11px 18px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.08s ease, background 0.15s ease, opacity 0.15s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn--primary { background: var(--acento-fuerte); color: #04212f; }
+.btn--primary:hover { background: var(--acento); }
+.btn--primary[data-conectado="true"] { background: var(--rojo); color: #fff; }
+.btn--ghost {
+  background: transparent;
+  color: var(--texto-suave);
+  border: 1px solid var(--borde);
+  padding: 6px 12px;
+}
+.btn--ghost:hover { color: var(--texto); }
+
+/* Paneles peso / total --------------------------------------------- */
+.panels {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 18px;
+}
+
+.card--weight { text-align: center; }
+
+.weight {
+  font-family: "Consolas", monospace;
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--acento);
+  margin: 8px 0;
+}
+.weight span { font-size: 1.1rem; color: var(--texto-suave); }
+
+.card--total {
+  background: linear-gradient(160deg, #052e16, #064e3b);
+  border-color: #065f46;
+  text-align: center;
+}
+.total {
+  font-family: "Consolas", monospace;
+  font-size: 3.2rem;
+  font-weight: 800;
+  color: var(--verde);
+  margin: 6px 0;
+  word-break: break-word;
+}
+.total__detalle {
+  margin: 0;
+  color: #a7f3d0;
+  font-size: 0.85rem;
+}
+
+/* Badge de estado -------------------------------------------------- */
+.badge {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: #475569;
+  color: #e2e8f0;
+}
+.badge[data-estado="conectado"] { background: #14532d; color: #86efac; }
+.badge[data-estado="conectando"] { background: #78350f; color: #fcd34d; }
+.badge[data-estado="error"] { background: #7f1d1d; color: #fca5a5; }
+
+/* Registro --------------------------------------------------------- */
+.log__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.log__header h2 { margin: 0; }
+.log__actions { display: flex; gap: 8px; }
+
+.log {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: "Consolas", monospace;
+  font-size: 0.82rem;
+}
+.log li {
+  padding: 5px 8px;
+  border-bottom: 1px solid #ffffff10;
+  color: var(--texto-suave);
+}
+.log li.info { color: var(--texto); }
+.log li.ok { color: #86efac; }
+.log li.error { color: #fca5a5; }
+
+/* Pie -------------------------------------------------------------- */
+.app__footer {
+  text-align: center;
+  color: var(--texto-suave);
+  font-size: 0.78rem;
+}
+
+/* Responsive ------------------------------------------------------- */
+@media (max-width: 680px) {
+  .card--config { grid-template-columns: 1fr; }
+  .panels { grid-template-columns: 1fr; }
+  .total { font-size: 2.6rem; }
+}

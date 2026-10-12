@@ -1,0 +1,197 @@
+================================================================================
+ GUÍA DEL POS COMPLETO EN PRODUCCIÓN
+ Proyecto: Simulador de Báscula Comercial (RS232) + POS Web
+ Marco: DEMOSTRACIONES A CLIENTES (fase de venta / piloto)
+================================================================================
+
+NOTA IMPORTANTE (léase primero)
+--------------------------------------------------------------------------------
+Este repositorio contiene una DEMO para demostraciones comerciales. El POS web
+de pos_web/ muestra capacidad técnica (Web Serial API, cálculo en vivo), pero
+NO es un sistema contable ni de facturación. Este documento describe cómo se
+implementaría un POS COMPLETO y REAL para producción, y qué hay que DESCARTAR
+de la demo. Las piezas marcadas [DEMO] en el código se sustituyen; las
+[CONSERVAR] se reutilizan. Ver guia_integracion_bascula_produccion.txt para el
+módulo de báscula (hardware y servicio)."
+
+--------------------------------------------------------------------------------
+1. VISIÓN DEL POS DE PRODUCCIÓN
+--------------------------------------------------------------------------------
+Módulos funcionales:
+  1. Autenticación / usuarios (cajero, administrador, contador).
+  2. Catálogo de productos con PLU/EAN, precio unitario y precio por kg.
+  3. Caja (venta con báscula, captura manual, descuentos).
+  4. Módulo de báscula (consumo del servicio externo, sección previa).
+  5. Ticket / reimpresión (impresora térmica).
+  6. Reportes y corte de caja.
+  7. Administración (usuarios, precios, configuración).
+
+La demo cubre visualmente los puntos "caja con báscula" y "total en vivo";
+el resto debe construirse con el patrón descrito abajo.
+
+--------------------------------------------------------------------------------
+2. ARQUITECTURA (3 capas)
+--------------------------------------------------------------------------------
+  +----------------------------------------------------------+
+  | FRONTEND (web SPA o escritorio)                           |
+  |  - Login, catálogo, caja, ticket                          |
+  |  - Consume REST/WS del BACKEND (ya NO Web Serial)         |
+  +----------------------------------------------------------+
+  | BACKEND / NEGOCIO                                         |
+  |  - API REST (Python FastAPI  o  Node/Express)             |
+  |  - Lógica de venta, impuestos, descuentos, caja           |
+  |  - Cliente del servicio de báscula (GET /peso, /health)   |
+  +----------------------------------------------------------+
+  | DATOS                                                      |
+  |  - SQLite (desarrollo / caja única) -> PostgreSQL en red  |
+  |  - Backups automatizados                                   |
+  +----------------------------------------------------------+
+
+Notas:
+  - El frontend NUNCA abre el puerto serial en producción (motivos en la
+    guía de báscula, sec. 3). Solo la demo usa Web Serial.
+  - El backend hace polling (p. ej. cada 200 ms) a GET /peso del servicio de
+    báscula o recibe pushes por WebSocket.
+
+--------------------------------------------------------------------------------
+3. FLUJO DE VENTA CON PESAJE
+--------------------------------------------------------------------------------
+  1. El cajero selecciona el producto (PLU o lee EAN).
+  2. Si el producto se vende "por kg", la UI entra en modo PESAJE:
+       - Muestra el último peso estable del servicio.
+       - El total = precio_kg x peso_estable.
+  3. El cajero confirma cuando el peso está "estable" (no flotando).
+  4. Se guarda la línea con: EAN/PLU, peso, precio_kg, total, impuesto.
+  5. Se emite el ticket y el corte.
+
+Regla de negocio: una lectura solo entra a la venta si el estado devuelto por
+el servicio es "estable". Si la báscula está en "error", el cajero puede:
+  - Esperar a que se recupere, o
+  - Capturar peso MANUAL con permiso de supervisión (queda auditado; ver sec. 5).
+
+--------------------------------------------------------------------------------
+4. MODELO DE DATOS (resumen)
+--------------------------------------------------------------------------------
+  productos (id, plu, ean, descripcion, unidad: KG | PZA,
+             precio_kg, precio_uni, activo)
+  ventas (id, cajero_id, total_bruto, descuento, impuestos, total_neto,
+          fecha_hora, cerrada)
+  venta_lineas (id, venta_id, producto_id, cantidad_o_peso, precio_aplicado,
+                importe, iva)
+  cajeros / usuarios (id, nombre, rol, hash_contrasena)
+  cortes (id, cajero_id, apertura, cierre, base, total_ventas, diferencia)
+  log_pesaje (id, venta_linea_id, servicio_peso, tara, estado, marca_hora)
+        <- trazabilidad obligatoria si el peso alimenta una venta
+
+Reglas de impuestos y redondeo:
+  - IVA (ej. 16%) configurable por producto/categoría.
+  - Redondeo a 2 decimales en cada LÍNEA y en el total (definir política única:
+    "redondeo hacia el vendedor" NO permitido; usar redondeo bancario o a centavo).
+
+--------------------------------------------------------------------------------
+5. CAJA Y TICKET
+--------------------------------------------------------------------------------
+  - Línea de captura rápida (EAN numérico, PLU, o búsqueda por nombre).
+  - Total en vivo (igual UX que la demo, pero alimentado por el backend).
+  - Descuentos: por línea (%), por venta, con permiso.
+  - Corte de caja: base, ventas por forma de pago (efectivo/tarjeta), diferencia.
+  - Ticket: impresora térmica 80 mm. Configuración:
+      Windows: usar la impresora como cola del sistema (RAW ESC/POS o
+               "Generic / Text Only" -> copia a LPT/USB).
+      Linux  : CUPS -> impresora térmica; o envío ESC/POS por socket/USB.
+    Comandos mínimos configurables: corte (GS V 66 0 / FF), apertura de cajón
+    (ESC p 0 25 250) e inicialización (ESC @).
+  - Reimpresión: mantener el último ticket en memoria local.
+
+--------------------------------------------------------------------------------
+6. ROBUSTEZ DE LA VENTA (no perder ventas)
+--------------------------------------------------------------------------------
+  - Persistencia local (cola offline): si la red/POS cae, el cajero sigue
+    registrando ventas en local (SQLite) y el backend sincroniza al volver.
+  - Báscula caída: la venta NO se pierde; entra vía peso manual auditado
+    (ver flujo sec. 3) y queda señalado en log_pesaje + reporte.
+  - Anti-doble click / idempotencia: cada venta tiene id único del terminal.
+  - Conmutación: si el servicio de báscula no responde tras N reintentos, la
+    UI muestra una alarma clara y bloquea ventas "por kg" salvo el bypass
+    supervisado.
+
+--------------------------------------------------------------------------------
+7. REPORTES Y AUDITORÍA
+--------------------------------------------------------------------------------
+  - Corte de caja diario por cajero.
+  - Ventas por hora / por producto / por forma de pago.
+  - Reporte de ventas "por kg" y de pesos manuales (control).
+  - Trazabilidad: log_pesaje permite reconstruir qué lectura alimentó cada
+    línea (reutiliza el log global logs/bascula.log del servicio).
+
+--------------------------------------------------------------------------------
+8. DESPLIEGUE DEL POS
+--------------------------------------------------------------------------------
+  - Cliente: instalador Windows (InnoSetup o WiX). Pasos:
+      1) Empaquetar el frontend estático y/o el binario del backend.
+      2) InnoSetup: create exe, shortcut de escritorio, servicio de báscula como
+         dependencia opcional.
+      3) El instalador escribe la config (servidor de BD, url del servicio de
+         báscula) en un archivo .conf delimitado.
+  - Backend: servicio propio (mismos runner de la guía de báscula: NSSM/pm2/
+    systemd).
+  - Base de datos: pasar de SQLite a PostgreSQL/Windows cuando haya >1 terminal
+    o multi-sucursal. Migraciones versionadas.
+  - Backups: copia diaria cifrada; en Windows, copia de respaldo de la carpeta
+    de BD vía Tarea Programada.
+
+--------------------------------------------------------------------------------
+9. SEGURIDAD
+--------------------------------------------------------------------------------
+  - Sesiones + roles (cajero no puede borrar ventas ni ver reportes de otros).
+  - Contraseñas con hash (bcrypt/argon2); nunca en texto plano ni en logs.
+  - HTTPS/TLS en la red del punto de venta (certificado local o VPN).
+  - No exponer el servicio de báscula fuera de la red local.
+  - Respaldo cifrado y rotación.
+
+--------------------------------------------------------------------------------
+10. METROLOGÍA LEGAL (importante para la demo y para producción)
+--------------------------------------------------------------------------------
+  - En México, los instrumentos de medición para transacciones comerciales
+    deben cumplir la NOM-010-SCFI-2011 (y verificación por laboratorio
+    acreditado / DGN). La báscula física debe tener el sello y la calibración
+    vigente; los precios se exhiben por kilogramo.
+  - Esto es CRÍTICO para la demostración: la demo NO tiene validez legal.
+    Durante la demo debe aclararse al cliente que el peso es simulado y que un
+    entorno real requiere báscula certificada + firmware que refleje el estado
+    "estable" sancionado por el instrumento.
+  - Ajuste cero y tara: el instrumento certificado los gestiona; el software
+    solo muestra.
+  - Documentar esta limitación en el material de venta y en los contratos.
+
+--------------------------------------------------------------------------------
+11. CRITERIO DE DESCARTE DE LA DEMO (módulos)
+--------------------------------------------------------------------------------
+  Módulo demo                  Reemplazo en producción
+  ---------------------------- -------------------------------------------------
+  pos_web/app.js (Web Serial)  Backend REST + cliente del servicio de báscula
+  pos_web/index.html           Frontend SPA real (Login, catálogo, caja, ticket)
+  Cálculo de total en vivo     Backend (impuestos/descuentos) + GET /peso
+  Mock navigator.serial        Tests con báscula real (hardware-in-the-loop)
+  tests/pos.spec.js            Suite E2E del flujo completo de venta
+
+  Se REUTILIZA [CONSERVAR]:
+    - Patrón de estados y reconexión de app.js (migrado al backend).
+    - Dedupe de log y ring buffer (llevado a la UI real).
+    - registro_bascula.py para el backend/servicio.
+
+--------------------------------------------------------------------------------
+12. CHECKLIST DE PUESTA EN MARCHA (sitio real)
+--------------------------------------------------------------------------------
+[ ] Módulo báscula instalado y /health OK (guía de báscula, sec. 12).
+[ ] Backend corriendo (servicio + BD) sin acceso público al puerto serial.
+[ ] Catálogo cargado (PLU/EAN, precio kg y unitario).
+[ ] Ventas "por kg" se completan solo con peso "estable".
+[ ] Bypass de peso manual auditado funciona y queda en log_pesaje.
+[ ] Ticket y reimpresión correctos; cajón abre.
+[ ] Corte de caja cuadra (efectivo/tarjeta).
+[ ] Apagado/reinicio: el sistema recupera la sesión y las colas offline.
+[ ] Báscula certificada / verificación metrológica vigente antes de operar.
+================================================================================
+Fin de la guía. Documento técnico de la fase de DEMO; sin validez metrológica.
+================================================================================

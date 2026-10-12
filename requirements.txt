@@ -1,0 +1,7 @@
+# Dependencias del simulador de báscula / POS Web
+#
+# Nota: Tkinter (interfaz gráfica de simulador_gui.py e interfaz_bascula.py)
+# viene incluido con Python; en algunas distros Linux instálalo aparte:
+#   Ubuntu/Debian:  sudo apt install python3-tk
+#   Arch/Manjaro:   sudo pacman -S tk
+pyserial>=3.5

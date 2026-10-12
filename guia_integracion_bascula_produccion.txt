@@ -1,0 +1,267 @@
+================================================================================
+ GUÍA DE INTEGRACIÓN DE BÁSCULA EN PRODUCCIÓN
+ Proyecto: Simulador de Báscula Comercial (RS232) + POS Web
+ Marco: DEMOSTRACIONES A CLIENTES (fase de venta / piloto)
+================================================================================
+
+NOTA IMPORTANTE (léase primero)
+--------------------------------------------------------------------------------
+Este repositorio es una DEMO para demostraciones comerciales. Todo lo que
+genera "peso" aquí es SIMULADO (software), no proviene de una báscula física.
+Por tanto:
+
+  * No debe usarse para facturación, inventario, cobro legal ni control
+    metrológico en un comercio real.
+  * El peso mostrado por la demo NO tiene validez legal (ver sección
+    "Metrología legal" en guia_pos_completo_produccion.txt).
+  * Cada pieza de la demo está marcada en el código con [DEMO] para que el
+    equipo de desarrollo pueda DESCARTARLA con seguridad cuando se implemente
+    la solución real (marcada como [CONSERVAR]).
+
+Convención de marcas en el código
+--------------------------------------------------------------------------------
+  [DEMO]      -> Código de simulación/oficina que SE ELIMINA o SUSTITUYE en
+                 producción. El comentario indica qué lo reemplaza.
+  [CONSERVAR] -> Código reutilizable en producción (patrones, config, utilidades).
+  Consulta la "Tabla de descarte" al final de este documento antes de borrar nada.
+
+--------------------------------------------------------------------------------
+1. OBJETIVO Y ENTORNO
+--------------------------------------------------------------------------------
+Llevar el flujo "báscula -> caixa/POS" desde la simulación a una instalación
+real en un punto de venta, reutilizando lo que la demo dejó validado:
+
+  - Protocolo de trama: "PPP.PP KG\r\n" (ancho fijo, 2 decimales).
+  - Lógica de lector con buffer y reensamblado de líneas.
+  - Manejo de estado conectado/desconectado y reconexión.
+  - Log global con rotación (logs/bascula.log).
+
+Entornos soportados (iguales que la demo):
+  - Windows 10/11 (x64) -> servicio con NSSM o tarea programada.
+  - Linux (Ubuntu/Debian) -> servicio systemd.
+
+--------------------------------------------------------------------------------
+2. INTEGRACIÓN DE HARDWARE
+--------------------------------------------------------------------------------
+Báscula física (estándar comercial):
+  - Salida RS-232 (D-sub 9) o USB con chip serie (FTDI/CH340/CP2102).
+  - Cableado mínimo: TX del equipo a RX del adaptador, GND común (GND a GND).
+    NUNCA cablear RX-RX ni TX-TX.
+  - Fuente de alimentación propia (la demo no hace uso de energía del PC).
+
+Adaptador USB->Serial:
+  - El puerto aparecerá en el sistema como "COMx" en Windows o "/dev/ttyUSBx",
+    "/dev/ttyACMx" en Linux.
+  - Verificar el driver instalado (Administrador de dispositivos / lsusb).
+
+Protocolos más comunes de básculas reales:
+  a) Emisión CONTINUA (streaming): manda la trama indefinidamente
+     (ej. "005.42 KG\r\n" o con encabezado STX y checksum). Es el que replica
+     la demo.
+  b) Bajo DEMANDA (comando): el PC envía un byte de petición (ej. 0x05 ENQ) y
+     la báscula responde un peso (p. ej. STX + 6 dígitos + check). Se configura
+     en la báscula (DIP switches / menú) y se implementa en el servicio.
+
+Pasos de validación de hardware (misma rutina de la demo):
+  1. Conectar y comprobar que Windows/Linux lista el puerto:
+       Windows: Administrador de dispositivos / python list_ports.comports()
+       Linux  : ls /dev/ttyUSB* ; dmesg | tail
+  2. Ejecutar el auditor (reutilizable en producción):
+       python auditor_serial.py --puerto COMx
+  3. Abrir el puerto desde una sola aplicación (nunca dos a la vez).
+
+--------------------------------------------------------------------------------
+3. PATRÓN DE ARQUITECTURA (el cambio clave frente a la demo)
+--------------------------------------------------------------------------------
+En la demo el navegador usa Web Serial API directamente. En PRODUCCIÓN NO:
+
+  * Web Serial requiere que el usuario realice un gesto por cada autorización,
+    vive ligado a la pestaña y no es adecuado para un POS crítico.
+
+Arquitectura recomendada (patrón genérico, vale para Python y Node):
+  +----------------+    REST/WebSocket    +---------------------------+
+  | POS frontend   | <-------------------> | Servicio de báscula       |
+  | (nav/escritorio)|    /peso /health     | (daemon, único consumidor |
+  +----------------+                      |  del puerto serial)       |
+                                          +------------+--------------+
+                                                       | pyserial / serialport
+                                          +------------v--------------+
+                                          | Báscula física (RS232/USB) |
+                                          +---------------------------+
+
+  - UN único proceso abre el puerto (evita "Access denied").
+  - El POS consulta GET /peso (última lectura estable y su estado).
+  - Endpoint /health para monitoreo.
+  - La lógica de parser/estados/desconexión de la demo se REUTILIZA
+    íntegramente en el servicio (es [CONSERVAR]).
+
+--------------------------------------------------------------------------------
+4. RUNNER DEL SERVICIO (configuración)
+--------------------------------------------------------------------------------
+Windows (con PyInstaller + NSSM):
+  - Empaquetar: python -m PyInstaller --onefile --windowed servicio_bascula.py
+  - Registrar como servicio:
+      nssm install BasculaServicio "C:\...\dist\servicio_bascula.exe"
+      nssm set BasculaServicio AppDirectory "C:\...\dist"
+      nssm set BasculaServicio AppParameters "--puerto COM5 --baudrate 9600"
+      nssm set BasculaServicio AppRotateFiles 1
+      nssm set BasculaServicio AppRotateBytes 1048576
+      nssm start BasculaServicio
+
+  Alternativa ligera (sin NSSM): tarea programada al inicio de sesión con
+  reinicio en fallo (schtasks /create ... /sc onlogon /rl highest).
+
+Linux (systemd) -> archivo /etc/systemd/system/bascula.service:
+  [Unit]
+  Description=Servicio de bascula (POS)
+  After=network.target
+
+  [Service]
+  User=posuser
+  ExecStart=/opt/bascula/.venv/bin/python /opt/bascula/servicio_bascula.py --puerto /dev/ttyUSB0
+  Restart=on-failure
+  RestartSec=5
+  Environment=BASCULA_PUERTO=/dev/ttyUSB0
+  Environment=BASCULA_BAUDRATE=9600
+  Environment=BASCULA_LOG=/var/log/bascula/bascula.log
+  StandardOutput=journal
+
+  [Install]
+  WantedBy=multi-user.target
+
+  Activar: sudo systemctl daemon-reload && sudo systemctl enable --now bascula
+
+Node.js (serialport + pm2) -> ecosystem.config.cjs:
+  module.exports = {
+    apps: [{
+      name: 'bascula',
+      script: 'servicio_bascula.js',
+      args: '--puerto COM5 --baudrate 9600',
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 5000,
+      env: { BASCULA_LOG: 'C:/logs/bascula/bascula.log' },
+    }],
+  };
+  Inicio: pm2 start ecosystem.config.cjs && pm2 save && pm2 startup
+
+--------------------------------------------------------------------------------
+5. CONFIGURACIÓN (bascula.conf / .env)
+--------------------------------------------------------------------------------
+Campos soportados (nombres equivalentes en la demo ya usados por el proyecto):
+
+  BASCULA_PUERTO      = COM5            (o /dev/ttyUSB0)
+  BASCULA_BAUDRATE    = 9600
+  BASCULA_MODO        = stream | comando  (protocolo de la báscula real)
+  BASCULA_TIMEOUT     = 3               (segundos sin trama = "sin lectura")
+  BASCULA_REINTENTOS  = 5               (reconexión automática)
+  BASCULA_LOG         = logs/bascula.log (rotación 1 MiB x 3, ya implementada)
+  BASCULA_LOG_NIVEL   = INFO
+
+  En Windows el servicio se instala con estas como parámetros o variables del
+  servicio; en Linux, en el [Service] Environment= de systemd.
+
+--------------------------------------------------------------------------------
+6. LÓGICA DE PESAJE ESTABLE
+--------------------------------------------------------------------------------
+Estados del servicio (reutilizar la máquina de estados de la demo):
+
+  vacio            -> el último peso es 0 (báscula descargada)
+  estabilizandose  -> el peso cambia; no se considera definitivo
+  estable          -> el peso no varía más de ±X durante N lecturas
+  sobrecarga       -> peso >= capacidad de la báscula (alarma)
+  error            -> puerto caído, timeout o trama inválida
+
+Reglas recomendadas:
+  - "Lectura estable": el mismo valor durante al menos 2 tramas consecutivas.
+  - Filtro: descartar saltos bruscos (anti-picoteo) si la báscula no lo hace ya.
+  - Tara: valor de tara configurable; el peso mostrado = bruto - tara.
+  - Peso con VALIDEZ para venta: solo se usa una lectura en estado "estable".
+  - Límite inferior: lecturas < 0.010 kg se tratan como 0 (vacio).
+
+Peso 0 (importante): la demo transmite 0 de forma continua porque el "0" es
+  información (báscula vacía). En producción el servicio mantiene esa conducta
+  y el POS decide: si lleva N segundos sin trama, marca "sin comunicación".
+
+--------------------------------------------------------------------------------
+7. RECONEXIÓN Y WATCHDOG
+--------------------------------------------------------------------------------
+  - Reintento con backoff exponencial (0.5s, 1s ... máx. 5s) hasta
+    BASCULA_REINTENTOS, igual que el patrón ya probado en la demo.
+  - Watchdog: si no llega ninguna trama en BASCULA_TIMEOUT, se dispara
+    el estado "error" y el endpoint /health devuelve 503.
+  - Log de cada evento (conexión, timeout, reconexión) vía logs/bascula.log.
+
+--------------------------------------------------------------------------------
+8. SEGURIDAD
+--------------------------------------------------------------------------------
+  - Un único consumidor del puerto (el servicio). Puede marcarse en el
+    servicio y verificar con el auditor.
+  - Permisos Linux: añadir el usuario del servicio a dialout:
+      sudo usermod -aG dialout posuser
+  - No exponer el puerto ni credenciales en los endpoints públicos.
+  - logs/bascula.log no debe contener contraseñas ni tokens.
+
+--------------------------------------------------------------------------------
+9. OBSERVABILIDAD
+--------------------------------------------------------------------------------
+  - GET /health  -> {"estado":"estable","ultimo_peso":0.00,"uptime_s":123}
+  - GET /peso    -> {"peso":0.00,"unidad":"KG","estado":"vacio","tara":0}
+  - Eventos al log global con rotación (reutilizar registro_bascula.py).
+  - Opcional: métricas Prometheus (contador de tramas, tiempo sin lectura).
+
+--------------------------------------------------------------------------------
+10. QA EN PRODUCCIÓN (hardware-in-the-loop)
+--------------------------------------------------------------------------------
+  1. Auditor/validación: conectar la báscula real y verificar que el puerto
+     aparece y abre (python auditor_serial.py --puerto COMx).
+  2. Lectura manual: leer 10 tramas consecutivas y confirmar formato/checksum.
+  3. Estabilidad: colocar pesos de calibración (0.1, 1, 5, 20 kg) y verificar
+     que el estado pasa a "estable" sin fluctuaciones fantasma.
+  4. SOAK TEST: dejar el servicio 72h con lecturas continuas; el log debe
+     rotar (1 MiB x3) sin crecer sin límite y sin fugas de memoria.
+  5. Cortes: desconectar el USB/RS232 -> debe entrar en "error", reconectar ->
+     debe recuperarse solo (backoff + watchdog).
+  6. Doble proceso: intentar abrir el puerto desde una segunda app ->
+     debe fallar limpio (Access denied) sin romper el servicio.
+
+--------------------------------------------------------------------------------
+11. TABLA DE DESCARTE (DEMO -> PRODUCCIÓN)
+--------------------------------------------------------------------------------
+  Pieza [DEMO]                    Qué la reemplaza en producción
+  ------------------------------- ------------------------------------------------
+  simulador_bascula.py            Báscula física + servicio de báscula (secs. 3-6)
+  simulador_gui.py                Ídem + runner (sec. 4)
+  interfaz_bascula.py             Ídem (herramienta de pruebas de oficina)
+  lector_bascula.py               Cliente de pruebas; sustituido por el endpoint
+                                  REST /peso consumido por el POS
+  par_pty.py                      Hardware real (null-modem físico)
+  crear_par_com0com.bat           Driver/hardware: puerto físico real
+  tools/com0com/                  Eliminar (solo simulación Windows)
+  Web Serial API (pos_web/app.js) Servicio de báscula + REST/WebSocket
+  Mock navigator.serial (pos.spec.js)  Tests hardware-in-the-loop (sec. 10)
+
+  Piezas [CONSERVAR]              Uso en producción
+  ------------------------------- ------------------------------------------------
+  registro_bascula.py             Log global con rotación (secs. 5 y 9)
+  auditor_serial.py               Diagnóstico de puertos en el sitio
+  construir_trama / formato       Si la báscula real emite el mismo protocolo
+                                  "PPP.PP KG\r\n", se reutiliza tal cual
+  Máquina de estados + reconexión Patrón del frontend/servicio (secs. 6 y 7)
+  README.md / guías               Documentación de operación y descarte
+
+--------------------------------------------------------------------------------
+12. CHECKLIST DE PUESTA EN MARCHA
+--------------------------------------------------------------------------------
+[ ] Hardware conectado y visible (COMx / /dev/ttyUSBx).
+[ ] Driver funcionando; auditor pasa: python auditor_serial.py --puerto COMx
+[ ] Servicio instalado (NSSM / systemd / pm2) y en arranque automático.
+[ ] Config correcta: puerto, baudrate, protocolo, logs.
+[ ] GET /health responde y refleja el estado real de la báscula.
+[ ] Una sola app abriendo el puerto.
+[ ] SOAK test 72h sin fugas y con log rotado.
+[ ] Pruebas de corte de cable y reconexión automática.
+================================================================================
+Fin de la guía. Documento técnico de la fase de DEMO; no constituye validez
+metrológica legal. Ver guia_pos_completo_produccion.txt (sec. de metrología).
+================================================================================

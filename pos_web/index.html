@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<!-- =====================================================================
+     [DEMO] POS Web de DEMOSTRACIÓN a clientes (Web Serial API).
+     En producción esta UI se sustituye por el frontend real del POS
+     (login, catálogo, caja, ticket). Ver guia_pos_completo_produccion.txt.
+     ===================================================================== -->
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>POS Web - Báscula Serial</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="app__header">
+      <h1>Punto de Venta <span>· Báscula Serial</span></h1>
+      <p class="app__subtitle">
+        Lectura en tiempo real vía <strong>Web Serial API</strong> (requiere
+        Chrome/Edge y contexto seguro: localhost o HTTPS).
+      </p>
+    </header>
+
+    <section class="card card--config">
+      <div class="field">
+        <label for="precioKg">Precio por Kg ($)</label>
+        <input id="precioKg" type="number" min="0" step="0.01" value="50.00" />
+      </div>
+
+      <div class="field">
+        <label for="baudRate">Baud Rate</label>
+        <select id="baudRate">
+          <option value="9600" selected>9600</option>
+          <option value="4800">4800</option>
+          <option value="19200">19200</option>
+          <option value="38400">38400</option>
+          <option value="115200">115200</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="puertoSelect">Puerto autorizado</label>
+        <select id="puertoSelect">
+          <option value="">— Sin puertos autorizados —</option>
+        </select>
+      </div>
+
+      <div class="field field--action">
+        <button id="btnConectar" class="btn btn--primary" type="button">
+          Conectar Báscula
+        </button>
+      </div>
+
+      <div class="field field--action">
+        <button id="btnBuscar" class="btn btn--ghost" type="button">
+          Buscar otro puerto
+        </button>
+      </div>
+    </section>
+
+    <section class="panels">
+      <article class="card card--weight">
+        <h2>Peso Actual</h2>
+        <div class="weight" id="pesoActual">0.00 <span>KG</span></div>
+        <div class="badge" id="estadoBadge" data-estado="desconectado">
+          Desconectado
+        </div>
+      </article>
+
+      <article class="card card--total">
+        <h2>Precio Total a Cobrar</h2>
+        <div class="total" id="precioTotal">$ 0.00</div>
+        <p class="total__detalle" id="detalleCalculo">0.00 kg × $50.00 = $0.00</p>
+      </article>
+    </section>
+
+    <section class="card card--log">
+      <div class="log__header">
+        <h2>Registro de conexión</h2>
+        <div class="log__actions">
+          <button id="btnDescargar" class="btn btn--ghost" type="button">Descargar</button>
+          <button id="btnLimpiar" class="btn btn--ghost" type="button">Limpiar</button>
+        </div>
+      </div>
+      <ul id="log" class="log"></ul>
+    </section>
+
+    <footer class="app__footer">
+      <span id="soporte"></span>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
